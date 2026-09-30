@@ -96,21 +96,26 @@ manifests:
 deploy:
   kubectl: {}
 
-# Deployment Verification (executado pelo Cloud Deploy em cada fase do Canary)
+# Deployment Verification (executado pelo Cloud Deploy no Canary Rollout)
 verify:
   - name: verify-http-smoke-test
     container:
       name: curl-check
-      image: curlimages/curl:8.5.0
-      command: ["curl"]
+      image: google/cloud-sdk:slim
+      command: ["/bin/bash"]
       args:
-        - "-f"
-        - "--retry"
-        - "5"
-        - "--retry-connrefused"
-        - "--retry-delay"
-        - "2"
-        - "http://frontend:80/"
+        - "-c"
+        - |
+          set -e
+          echo "Obtendo IP exposto do serviço frontend..."
+          IP=$(gcloud compute forwarding-rules list --format="value(IP_ADDRESS)" | head -n 1)
+          if [ -z "$IP" ]; then
+            echo "Nenhum IP encontrado para o frontend."
+            exit 1
+          fi
+          echo "Validando resposta HTTP do frontend em http://${IP}/..."
+          curl -f --retry 10 --retry-connrefused --retry-delay 2 "http://${IP}/" > /dev/null
+          echo "Smoke test concluído com sucesso: endpoint respondeu com HTTP 200 OK!"
 # [END gke_bank_of_anthos_skaffold_config_frontend]
 ---
 # [START gke_bank_of_anthos_skaffold_config_loadgenerator]

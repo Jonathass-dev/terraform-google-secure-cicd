@@ -96,26 +96,41 @@ manifests:
 deploy:
   kubectl: {}
 
-# Deployment Verification (executado pelo Cloud Deploy no Canary Rollout)
+# Deployment verification (Health check executed by Cloud Deploy during rollout phases)
 verify:
-  - name: verify-http-smoke-test
+  - name: deployment-healthcheck
     container:
-      name: curl-check
+      name: healthcheck-runner
       image: google/cloud-sdk:slim
+      env:
+        - name: SERVICE_NAME
+          value: "frontend"
+        - name: HEALTHCHECK_PATH
+          value: "/"
       command: ["/bin/bash"]
       args:
         - "-c"
         - |
           set -e
-          echo "Obtendo IP exposto do serviço frontend..."
-          IP=$(gcloud compute forwarding-rules list --format="value(IP_ADDRESS)" | head -n 1)
+          echo "Starting health check verification for service: ${SERVICE_NAME}..."
+
+          # Discover service load balancer endpoint IP via Google Cloud API
+          IP=$(gcloud compute forwarding-rules list --filter="name ~ ${SERVICE_NAME}" --format="value(IP_ADDRESS)" | head -n 1)
           if [ -z "$IP" ]; then
-            echo "Nenhum IP encontrado para o frontend."
+            IP=$(gcloud compute forwarding-rules list --format="value(IP_ADDRESS)" | head -n 1)
+          fi
+
+          if [ -z "$IP" ]; then
+            echo "ERROR: No active network endpoint found for service ${SERVICE_NAME}."
             exit 1
           fi
-          echo "Validando resposta HTTP do frontend em http://${IP}/..."
-          curl -f --retry 10 --retry-connrefused --retry-delay 2 "http://${IP}/" > /dev/null
-          echo "Smoke test concluído com sucesso: endpoint respondeu com HTTP 200 OK!"
+
+          ENDPOINT="http://${IP}${HEALTHCHECK_PATH}"
+          echo "Querying health check at: ${ENDPOINT}"
+
+          # Execute HTTP health check with retries for load balancer warm-up
+          curl -f --retry 10 --retry-connrefused --retry-delay 2 --max-time 5 "${ENDPOINT}" > /dev/null
+          echo "Health check completed successfully: endpoint responded with HTTP 200 OK!"
 # [END gke_bank_of_anthos_skaffold_config_frontend]
 ---
 # [START gke_bank_of_anthos_skaffold_config_loadgenerator]
